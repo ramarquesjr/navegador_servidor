@@ -7,6 +7,7 @@ import ssl
 import sys
 import re
 import os
+import shutil
 
 def processa_url(url: str):
     ''' Função que processa a url, separando dados importantes como protocolo,
@@ -108,33 +109,36 @@ if __name__ == '__main__':
     # Envia a requisição
     s.send(requisicao)
 
-    dados = b''
+    sep = b'\r\n\r\n'
+    osep = b'\n\n'
+    econteudo = False
+    cabecalho =  b''
+    ftemp = open("temp.out", "wb")
 
     try:
         while True:
             s.settimeout(1)
-            resp = s.recv(2048)
-
+            resp = s.recv(1024)
             if not len(resp):
                 break
-
-            dados += resp
+            if econteudo:
+                ftemp.write(resp)
+            elif sep in resp:
+                cabecalho += resp.split(sep)[0]
+                ftemp.write(resp.split(sep)[1])
+                econteudo = True
+            elif osep in resp:
+                cabecalho += resp.split(sep)[0]
+                ftemp.write(resp.split(sep)[1])
+                econteudo = True
     except Exception as e:
         # Timeout
         pass
     finally:
         s.close()
+    ftemp.close()
 
-    # Verifica e define qual o CRLF entregue para a separação do cabeçalho
-    # e da parte de dados da resposta (duplo ou não)
-    sep = b'\r\n\r\n'
-    if sep not in dados:
-        sep = b'\n\n'
-
-    cabecalho = dados.split(sep)[0].decode()
-    # Copia a partir de todo o conteúdo do cabeçalho somado aos caracteres
-    # do separador
-    conteudo = dados[len(cabecalho) + len(sep):]
+    cabecalho = cabecalho.decode()
 
     # A partir do header, coleta os dados mais importantes
     # (content_type, HTTP_CODE)
@@ -160,6 +164,7 @@ if __name__ == '__main__':
     print('Código:', codigo_resposta, '({0})'.format(texto_codigo_resposta))
 
     if codigo_resposta != '200':
+        os.remove('temp.out')
         sys.exit()
 
     print('Content-Type:', content_type, '({0})'.format(extensao_arquivo))
@@ -174,9 +179,10 @@ if __name__ == '__main__':
         os.mkdir(consulta["host"])
     except Exception as e:
         pass
-    with open(consulta["host"] + "/" + nome_arquivo + extensao_arquivo, 'wb') as f:
-        f.write(conteudo)
 
-    print('Nome do arquivo salvo:', consulta["host"] + "/" + 
+    # Move o arquivo temporário para o local e com o nome devidos
+    shutil.move('temp.out', consulta["host"] + "/" + nome_arquivo + extensao_arquivo)
+
+    print('Nome do arquivo salvo:', consulta["host"] + "/" +
           nome_arquivo + extensao_arquivo)
     print()
