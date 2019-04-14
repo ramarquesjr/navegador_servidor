@@ -3,6 +3,7 @@ import os
 import socket
 import sys
 import time
+from urllib.parse import quote, unquote
 from library import (
     magic,
     html
@@ -35,6 +36,7 @@ def processa_requisicao(conexao, info_cliente):
     '''
     metodo, recurso, versao = '', '', ''
     req = con.recv(1024).decode()
+    earquivo = False
     try:
         metodo, recurso, versao = req.split('\n')[0].split(' ')
         # Suporta apenas o método GET
@@ -49,7 +51,7 @@ def processa_requisicao(conexao, info_cliente):
         # Sanitizar o recurso solicitado para previnir local file inclusion a
         # partir da url informada
         # https://www.owasp.org/index.php/Testing_for_Local_File_Inclusion
-        recurso = recurso.replace('..', '.').replace('//', '/')
+        recurso = unquote(recurso.replace('..', '.').replace('//', '/'))
 
         # Resposta padrão, sobrecarregado se for encontrado outro recurso
         codigo_http = '200'
@@ -67,7 +69,8 @@ def processa_requisicao(conexao, info_cliente):
 
         if os.path.isfile(fpath):
             tipo_conteudo = magic.from_file(fpath, mime=True)
-            resposta = open(fpath, 'rb').read()
+            resposta = b''
+            earquivo = True
         elif os.path.isdir(fpath):
             if not os.listdir(fpath) and recurso == '/':
                 # Se o diretório é vazio, mantém a mensagem padrão
@@ -94,7 +97,8 @@ def processa_requisicao(conexao, info_cliente):
                         ftype = 'DIR'
                     lista += '<tr>'
                     lista += '<td>' + ftype +'</td>'
-                    lista += '<td><a href="' + recurso.rstrip('/') + '/' + i + '">' + i + '</a></td>'
+                    urlrecurso = recurso.rstrip('/') + '/' + i
+                    lista += '<td><a href="' + quote(urlrecurso) + '">' + i + '</a></td>'
                     lista += '<td>' + data_modificacao + '</td>'
                     lista += '<td>' + bytes + '</td>'
                     lista += '</tr>'
@@ -132,12 +136,22 @@ def processa_requisicao(conexao, info_cliente):
         # Se a resposta não for binária, codifique para envio
         if isinstance(resposta, str):
             resposta = resposta.encode()
+            for i in range(0, len(resposta), 1024):
+                try:
+                    conexao.send(resposta[i:i + 1024])
+                except BrokenPipeError:
+                    pass
+        elif earquivo:
+            with open(fpath, 'rb') as arquivo:
+                while True:
+                    data = arquivo.read(1024)
+                    if not data:
+                        break
+                    try:
+                        conexao.send(data)
+                    except BrokenPipeError:
+                        pass
         # Franciona o envio da resposta em blocos de 1024 bytes
-        for i in range(0, len(resposta), 1024):
-            try:
-                conexao.send(resposta[i:i + 1024])
-            except BrokenPipeError:
-                pass
         conexao.close()
 
 
